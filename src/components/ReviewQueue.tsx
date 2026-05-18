@@ -140,6 +140,25 @@ export function ReviewQueue({ initial }: Props) {
     setBusy(false);
   };
 
+  const markLowRelevancy = async () => {
+    if (!current || busy) return;
+    setBusy(true);
+    // Approve + flag as low relevancy. Stays in the app but ranked low.
+    await supabase
+      .from('curated_exercises')
+      .update({
+        is_low_relevancy: true,
+        is_approved: true,
+        approved_at: new Date().toISOString(),
+      })
+      .eq('id', current.id);
+    await logAction(current.id, 'low_relevancy', { name: current.canonical_name }, null);
+    setStats((s) => ({ session: s.session + 1 }));
+    next();
+    if (queue.length <= 3) await fetchMore();
+    setBusy(false);
+  };
+
   useEffect(() => {
     if (!name) return;
     const onKey = (e: KeyboardEvent) => {
@@ -156,6 +175,7 @@ export function ReviewQueue({ initial }: Props) {
       else if (e.key === 'e') { e.preventDefault(); renameRef.current?.focus(); }
       else if (e.key === 'a') { e.preventDefault(); aliasRef.current?.focus(); }
       else if (e.key === 's') { e.preventDefault(); skip(); }
+      else if (e.key === 'l') { e.preventDefault(); markLowRelevancy(); }
       else if (e.key === 'h') { e.preventDefault(); hide(); }
     };
     window.addEventListener('keydown', onKey);
@@ -214,16 +234,7 @@ export function ReviewQueue({ initial }: Props) {
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        {current.image_url ? (
-          <div className="aspect-video bg-zinc-950 flex items-center justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={current.image_url} alt={current.canonical_name} className="max-h-full max-w-full object-contain" />
-          </div>
-        ) : (
-          <div className="aspect-video bg-zinc-950 flex items-center justify-center text-zinc-700 text-sm">
-            no image
-          </div>
-        )}
+        <ExerciseImages url={current.image_url} alt={current.canonical_name} />
 
         <div className="p-6 space-y-4">
           <div>
@@ -296,7 +307,7 @@ export function ReviewQueue({ initial }: Props) {
           </div>
         </div>
 
-        <div className="border-t border-zinc-800 grid grid-cols-3 divide-x divide-zinc-800">
+        <div className="border-t border-zinc-800 grid grid-cols-4 divide-x divide-zinc-800">
           <button
             disabled={busy}
             onClick={hide}
@@ -304,6 +315,14 @@ export function ReviewQueue({ initial }: Props) {
           >
             <span className="font-semibold">Hide</span>
             <span className="block text-[10px] text-zinc-600 mt-0.5">H</span>
+          </button>
+          <button
+            disabled={busy}
+            onClick={markLowRelevancy}
+            className="py-4 text-sm text-zinc-500 hover:text-amber-400 disabled:opacity-40 transition"
+          >
+            <span className="font-semibold">Low rel.</span>
+            <span className="block text-[10px] text-zinc-600 mt-0.5">L</span>
           </button>
           <button
             disabled={busy}
@@ -319,7 +338,7 @@ export function ReviewQueue({ initial }: Props) {
             className="py-4 text-sm bg-lime-400/10 text-lime-300 hover:bg-lime-400/20 disabled:opacity-40 transition"
           >
             <span className="font-semibold">Looks good ✓</span>
-            <span className="block text-[10px] text-lime-500/70 mt-0.5">J / Enter</span>
+            <span className="block text-[10px] text-lime-500/70 mt-0.5">J / ↵</span>
           </button>
         </div>
       </div>
@@ -328,9 +347,46 @@ export function ReviewQueue({ initial }: Props) {
         Shortcuts: <kbd className="bg-zinc-900 px-1 rounded">E</kbd> rename ·{' '}
         <kbd className="bg-zinc-900 px-1 rounded">A</kbd> alias ·{' '}
         <kbd className="bg-zinc-900 px-1 rounded">J</kbd> approve ·{' '}
+        <kbd className="bg-zinc-900 px-1 rounded">L</kbd> low rel ·{' '}
         <kbd className="bg-zinc-900 px-1 rounded">S</kbd> skip ·{' '}
         <kbd className="bg-zinc-900 px-1 rounded">H</kbd> hide
       </p>
+    </div>
+  );
+}
+
+// ─── Side-by-side image pair ────────────────────────────────────────
+// free-exercise-db ships every exercise with two photos ending in /0.jpg
+// and /1.jpg (a start + finish frame). We show both so the curator has
+// the full picture — matches the mobile app's two-frame loop.
+function ExerciseImages({ url, alt }: { url: string | null; alt: string }) {
+  if (!url) {
+    return (
+      <div className="aspect-video bg-zinc-950 flex items-center justify-center text-zinc-700 text-sm">
+        no image
+      </div>
+    );
+  }
+  const secondary = url.replace(/\/0\.jpg$/, '/1.jpg');
+  const hasSecondary = secondary !== url;
+  if (!hasSecondary) {
+    return (
+      <div className="aspect-video bg-zinc-950 flex items-center justify-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt={alt} className="max-h-full max-w-full object-contain" />
+      </div>
+    );
+  }
+  return (
+    <div className="grid grid-cols-2 bg-zinc-950 gap-px">
+      <div className="aspect-square flex items-center justify-center bg-zinc-950">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt={`${alt} start`} className="max-h-full max-w-full object-contain" />
+      </div>
+      <div className="aspect-square flex items-center justify-center bg-zinc-950">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={secondary} alt={`${alt} finish`} className="max-h-full max-w-full object-contain" />
+      </div>
     </div>
   );
 }

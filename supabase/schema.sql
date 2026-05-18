@@ -15,8 +15,9 @@ create table if not exists curated_exercises (
   category text,                          -- lift | conditioning | stretching
   movement_pattern text,                  -- push | pull | hinge | squat | carry | rotate | core
   image_url text,
-  is_approved boolean not null default false,   -- "looks well-labeled" flag
-  is_hidden boolean not null default false,     -- hide from app
+  is_approved boolean not null default false,         -- "looks well-labeled" flag
+  is_hidden boolean not null default false,           -- hide from app entirely
+  is_low_relevancy boolean not null default false,    -- show, but deprioritized
   approved_at timestamptz,
   approved_by uuid references auth.users(id),
   rename_count integer not null default 0,      -- how many times it's been renamed

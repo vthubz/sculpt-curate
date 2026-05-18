@@ -11,6 +11,7 @@ export interface CuratedExercise {
   image_url: string | null;
   is_approved: boolean;
   is_hidden: boolean;
+  is_low_relevancy: boolean;
   approved_at: string | null;
   approved_by: string | null;
   rename_count: number;
