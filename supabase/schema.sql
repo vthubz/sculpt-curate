@@ -33,6 +33,7 @@ create table if not exists exercise_aliases (
   exercise_id uuid not null references curated_exercises(id) on delete cascade,
   alias text not null,
   contributor_id uuid references auth.users(id),
+  contributor_name text,                 -- free-text name for anon contributors
   vote_score integer not null default 0,
   is_removed boolean not null default false,
   created_at timestamptz not null default now(),
@@ -45,7 +46,8 @@ create index if not exists idx_exercise_aliases_exercise on exercise_aliases(exe
 create table if not exists curation_actions (
   id uuid primary key default gen_random_uuid(),
   exercise_id uuid not null references curated_exercises(id) on delete cascade,
-  contributor_id uuid not null references auth.users(id),
+  contributor_id uuid references auth.users(id),
+  contributor_name text,                 -- free-text name for anon contributors
   action text not null,                  -- approved | renamed | aliased | hidden | unhidden | muscles
   before_value jsonb,
   after_value jsonb,

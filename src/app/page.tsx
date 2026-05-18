@@ -1,17 +1,10 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase-server';
-import { SignInButton } from '@/components/SignInButton';
+
+export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
   const supabase = await createSupabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (user) {
-    redirect('/review');
-  }
-
-  // Stats for the public landing.
   const { count: total } = await supabase
     .from('curated_exercises')
     .select('*', { count: 'exact', head: true });
@@ -47,7 +40,12 @@ export default async function HomePage() {
           </div>
         ) : null}
 
-        <SignInButton />
+        <Link
+          href="/review"
+          className="self-start inline-flex items-center gap-3 rounded-full bg-lime-400 px-6 py-3 font-semibold text-zinc-950 transition hover:bg-lime-300"
+        >
+          Start curating →
+        </Link>
 
         <div className="text-sm text-zinc-500 space-y-2 pt-8 border-t border-zinc-900">
           <p>What you can do here:</p>
@@ -59,7 +57,6 @@ export default async function HomePage() {
         </div>
 
         <p className="text-xs text-zinc-600">
-          Browsing also fine without signing in →{' '}
           <Link href="/leaderboard" className="text-zinc-400 hover:text-zinc-100 underline">leaderboard</Link>
         </p>
       </div>

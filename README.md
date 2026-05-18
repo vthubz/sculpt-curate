@@ -1,9 +1,9 @@
 # Sculpt · Curation
 
-Public-facing tool for friends to clean up Sculpt's exercise catalog. Anyone
-signs in with Google, gets dropped into a queue of one-card-at-a-time
-exercises, and can **approve / rename / add aliases** to make the Sculpt
-mobile app smarter.
+Open tool for friends to clean up Sculpt's exercise catalog. Anyone with
+the URL types a display name once, then gets dropped into a queue of
+one-card-at-a-time exercises and can **approve / rename / add aliases**
+to make the Sculpt mobile app smarter. No login.
 
 Built with **Next.js 16** + **Tailwind** + **Supabase** (sharing the same
 Sculpt project — auth, schema, and users are reused).
@@ -29,15 +29,12 @@ commit it; this is a one-time run.
 
 Confirms ~800 rows in `curated_exercises`, all with `is_approved = false`.
 
-### 3. Allow this site's OAuth redirect URL
+### 3. Open the schema to anon contributors
 
-In Supabase Authentication → URL Configuration:
-- Add `https://curate.huber.llc/auth/callback` to **Redirect URLs**.
-- Add `http://localhost:3000/auth/callback` for local dev.
+Run `supabase/migration-anon.sql` once on top of the base schema. This
+allows anyone (with the site URL) to write without signing in.
 
-(Google OAuth is already configured for Sculpt.)
-
-### 4. Deploy to Vercel + DNS
+### 4. Deploy to Vercel
 
 ```bash
 cd ~/sculpt-curate

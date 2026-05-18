@@ -3,12 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import type { CuratedExercise } from '@/lib/types';
 
+const NAME_KEY = 'sculpt-curate.name';
+
 interface Props {
   initial: CuratedExercise[];
-  userId: string;
 }
 
-export function ReviewQueue({ initial, userId }: Props) {
+export function ReviewQueue({ initial }: Props) {
   const supabase = useMemo(() => createSupabaseBrowser(), []);
   const [queue, setQueue] = useState<CuratedExercise[]>(initial);
   const [busy, setBusy] = useState(false);
@@ -16,11 +17,27 @@ export function ReviewQueue({ initial, userId }: Props) {
   const [aliasDraft, setAliasDraft] = useState('');
   const [stats, setStats] = useState({ session: 0 });
 
+  // Free-text display name stored in localStorage. Asked once.
+  const [name, setName] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState('');
+
+  useEffect(() => {
+    const stored = typeof window !== 'undefined' ? window.localStorage.getItem(NAME_KEY) : null;
+    if (stored) setName(stored);
+  }, []);
+
+  const saveName = () => {
+    const trimmed = nameDraft.trim();
+    if (!trimmed) return;
+    window.localStorage.setItem(NAME_KEY, trimmed);
+    setName(trimmed);
+  };
+
   const current = queue[0] ?? null;
   const renameRef = useRef<HTMLInputElement>(null);
   const aliasRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
 
-  // Reset drafts when the next card slides in.
   useEffect(() => {
     setRenameDraft(current?.canonical_name ?? '');
     setAliasDraft('');
@@ -43,7 +60,7 @@ export function ReviewQueue({ initial, userId }: Props) {
   const logAction = async (exerciseId: string, action: string, before: unknown, after: unknown) => {
     await supabase.from('curation_actions').insert({
       exercise_id: exerciseId,
-      contributor_id: userId,
+      contributor_name: name,
       action,
       before_value: before ?? null,
       after_value: after ?? null,
@@ -55,11 +72,7 @@ export function ReviewQueue({ initial, userId }: Props) {
     setBusy(true);
     await supabase
       .from('curated_exercises')
-      .update({
-        is_approved: true,
-        approved_at: new Date().toISOString(),
-        approved_by: userId,
-      })
+      .update({ is_approved: true, approved_at: new Date().toISOString() })
       .eq('id', current.id);
     await logAction(current.id, 'approved', { name: current.canonical_name }, null);
     setStats((s) => ({ session: s.session + 1 }));
@@ -72,7 +85,7 @@ export function ReviewQueue({ initial, userId }: Props) {
     if (!current || busy) return;
     const newName = renameDraft.trim();
     if (!newName || newName === current.canonical_name) {
-      approve(); // No edit → treat as approval.
+      approve();
       return;
     }
     setBusy(true);
@@ -83,15 +96,9 @@ export function ReviewQueue({ initial, userId }: Props) {
         rename_count: current.rename_count + 1,
         is_approved: true,
         approved_at: new Date().toISOString(),
-        approved_by: userId,
       })
       .eq('id', current.id);
-    await logAction(
-      current.id,
-      'renamed',
-      { name: current.canonical_name },
-      { name: newName }
-    );
+    await logAction(current.id, 'renamed', { name: current.canonical_name }, { name: newName });
     setStats((s) => ({ session: s.session + 1 }));
     next();
     if (queue.length <= 3) await fetchMore();
@@ -106,7 +113,7 @@ export function ReviewQueue({ initial, userId }: Props) {
     const { error } = await supabase.from('exercise_aliases').insert({
       exercise_id: current.id,
       alias,
-      contributor_id: userId,
+      contributor_name: name,
     });
     if (!error) {
       await logAction(current.id, 'aliased', null, { alias });
@@ -116,15 +123,14 @@ export function ReviewQueue({ initial, userId }: Props) {
     setBusy(false);
   };
 
-  const skip = async () => {
+  const skip = () => {
     if (!current || busy) return;
-    // Move to the bottom so we still come back to it.
     setQueue((q) => [...q.slice(1), q[0]]);
   };
 
   const hide = async () => {
     if (!current || busy) return;
-    if (!confirm(`Hide "${current.canonical_name}" from the Sculpt app? (e.g. it's a duplicate or junk)`)) return;
+    if (!confirm(`Hide "${current.canonical_name}" from the Sculpt app? (duplicate, junk, etc.)`)) return;
     setBusy(true);
     await supabase.from('curated_exercises').update({ is_hidden: true }).eq('id', current.id);
     await logAction(current.id, 'hidden', { name: current.canonical_name }, null);
@@ -134,8 +140,8 @@ export function ReviewQueue({ initial, userId }: Props) {
     setBusy(false);
   };
 
-  // Keyboard shortcuts: j approves, e rename focus, a alias focus, s skip, h hide.
   useEffect(() => {
+    if (!name) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') {
         if (e.key === 'Enter' && (e.target as HTMLInputElement) === renameRef.current) {
@@ -155,7 +161,37 @@ export function ReviewQueue({ initial, userId }: Props) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, queue.length]);
+  }, [current?.id, queue.length, name]);
+
+  // ─── Name prompt (one-time, stored in localStorage) ───
+  if (!name) {
+    return (
+      <div className="max-w-md mx-auto px-6 py-24 space-y-6">
+        <h2 className="text-2xl font-bold">What's your name?</h2>
+        <p className="text-sm text-zinc-400">
+          So you get credit on the leaderboard. Just a label — no account, no email. Stored on this device only.
+        </p>
+        <div className="flex gap-2">
+          <input
+            ref={nameRef}
+            autoFocus
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') saveName(); }}
+            placeholder="e.g. Ryan"
+            className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:border-lime-400/50"
+          />
+          <button
+            disabled={!nameDraft.trim()}
+            onClick={saveName}
+            className="rounded-lg bg-lime-400 hover:bg-lime-300 text-zinc-950 font-semibold px-5 disabled:opacity-40"
+          >
+            Continue
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!current) {
     return (
@@ -164,7 +200,7 @@ export function ReviewQueue({ initial, userId }: Props) {
         <h2 className="text-2xl font-bold">Queue is empty.</h2>
         <p className="text-zinc-400">Every unapproved exercise has been touched. Come back tomorrow.</p>
         <p className="text-xs text-zinc-500 pt-4">
-          You approved <span className="text-lime-400 font-semibold">{stats.session}</span> this session.
+          You handled <span className="text-lime-400 font-semibold">{stats.session}</span> this session.
         </p>
       </div>
     );
@@ -172,13 +208,11 @@ export function ReviewQueue({ initial, userId }: Props) {
 
   return (
     <div className="max-w-xl mx-auto px-6 py-12 space-y-8">
-      {/* Session counter */}
       <div className="flex items-center justify-between text-xs text-zinc-500">
-        <span>This session: <span className="text-lime-400 font-semibold">{stats.session}</span></span>
+        <span>Signed as <span className="text-zinc-300 font-semibold">{name}</span> · {stats.session} this session</span>
         <span>{queue.length} in queue</span>
       </div>
 
-      {/* The card */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         {current.image_url ? (
           <div className="aspect-video bg-zinc-950 flex items-center justify-center">
@@ -200,7 +234,6 @@ export function ReviewQueue({ initial, userId }: Props) {
             )}
           </div>
 
-          {/* Tags */}
           <div className="flex flex-wrap gap-1.5 text-xs">
             {current.category && (
               <span className="rounded-full bg-zinc-800 px-2.5 py-1 text-zinc-300">{current.category}</span>
@@ -220,7 +253,6 @@ export function ReviewQueue({ initial, userId }: Props) {
             ))}
           </div>
 
-          {/* Rename */}
           <div className="space-y-2">
             <label className="text-xs uppercase tracking-wider text-zinc-500">Rename ✏</label>
             <div className="flex gap-2">
@@ -241,7 +273,6 @@ export function ReviewQueue({ initial, userId }: Props) {
             </div>
           </div>
 
-          {/* Aliases */}
           <div className="space-y-2">
             <label className="text-xs uppercase tracking-wider text-zinc-500">
               Add an alias <span className="text-zinc-600">(e.g. "RDL", "BB bench", "OHP")</span>
@@ -265,7 +296,6 @@ export function ReviewQueue({ initial, userId }: Props) {
           </div>
         </div>
 
-        {/* Action bar */}
         <div className="border-t border-zinc-800 grid grid-cols-3 divide-x divide-zinc-800">
           <button
             disabled={busy}

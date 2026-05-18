@@ -4,8 +4,7 @@ import { createSupabaseServer } from '@/lib/supabase-server';
 export const dynamic = 'force-dynamic';
 
 interface Row {
-  user_id: string;
-  display_name: string | null;
+  display_name: string;
   avatar_url: string | null;
   approvals: number;
   renames: number;
@@ -45,18 +44,18 @@ export default async function LeaderboardPage() {
         ) : (
           <div className="rounded-2xl border border-zinc-800 overflow-hidden divide-y divide-zinc-900">
             {rows.map((r, i) => (
-              <div key={r.user_id} className="flex items-center gap-4 px-5 py-4">
+              <div key={`${r.display_name}-${i}`} className="flex items-center gap-4 px-5 py-4">
                 <span className="w-6 text-zinc-500 font-mono text-sm">{i + 1}</span>
                 {r.avatar_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={r.avatar_url} alt="" className="w-9 h-9 rounded-full" />
                 ) : (
                   <div className="w-9 h-9 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 text-sm font-semibold">
-                    {(r.display_name ?? 'U').charAt(0).toUpperCase()}
+                    {r.display_name.charAt(0).toUpperCase()}
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-zinc-100 font-semibold truncate">{r.display_name ?? 'User'}</p>
+                  <p className="text-zinc-100 font-semibold truncate">{r.display_name}</p>
                   <p className="text-xs text-zinc-500">
                     {r.approvals} approved · {r.renames} renamed · {r.aliases_added} aliases
                   </p>
