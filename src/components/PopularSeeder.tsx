@@ -140,36 +140,60 @@ export function PopularSeeder({
     return ms;
   }, [exercises, aliasMap]);
 
-  // Find candidates: MiniSearch hits + a substring fallback on canonical/
-  // original_name in case the index misses obvious matches.
+  // Mirror the mobile app's ranking exactly so what you see here matches
+  // what the user sees in the picker. MiniSearch base score, plus:
+  //   + popularity × 0.4   (the dominant signal for staple lifts)
+  //   + 8 if approved
+  //   − 60 if low-relevancy
+  //   + 1000 for exact canonical match (always wins)
+  //   + 50 if canonical starts with the query (prefix preference)
+  // Then a substring fallback so obvious literal matches never disappear.
+  const exerciseById = useMemo(
+    () => new Map(exercises.map((e) => [e.id, e])),
+    [exercises]
+  );
+
   const searchCandidates = useCallback(
     (query: string, excludeIds: Set<string>): string[] => {
       const q = query.trim().toLowerCase();
       if (!q) return [];
-      const hits = index.search(query);
-      const ids: string[] = [];
-      const seen = new Set<string>();
-      for (const h of hits) {
-        const id = h.id as string;
-        if (excludeIds.has(id) || seen.has(id)) continue;
-        seen.add(id);
-        ids.push(id);
-      }
-      // Substring fallback — guarantees we never miss a name that literally
-      // contains the query (e.g. typing "bench" should always surface the
-      // bench press entries).
       const tokens = q.split(/\s+/).filter(Boolean);
+
+      // Gather candidates with base scores from MiniSearch + literal fallback.
+      const base = new Map<string, number>();
+      for (const h of index.search(query)) {
+        const id = h.id as string;
+        if (excludeIds.has(id)) continue;
+        base.set(id, h.score);
+      }
       for (const e of exercises) {
-        if (excludeIds.has(e.id) || seen.has(e.id)) continue;
+        if (excludeIds.has(e.id) || base.has(e.id)) continue;
         const haystack = (e.canonical_name + ' ' + (e.original_name ?? '')).toLowerCase();
         if (tokens.every((t) => haystack.includes(t))) {
-          seen.add(e.id);
-          ids.push(e.id);
+          base.set(e.id, 1); // small floor so it competes once boosted
         }
       }
-      return ids.slice(0, 12);
+
+      // Apply the mobile-app-style adjustments.
+      const ranked: { id: string; score: number }[] = [];
+      for (const [id, baseScore] of base) {
+        const ex = exerciseById.get(id);
+        if (!ex) continue;
+        let s = baseScore;
+        s += (ex.popularity ?? 0) * 0.4;
+        if (ex.is_approved) s += 8;
+        if (ex.is_low_relevancy) s -= 60;
+
+        const name = ex.canonical_name.toLowerCase();
+        if (name === q) s += 1000;
+        else if (name.startsWith(q)) s += 50;
+
+        ranked.push({ id, score: s });
+      }
+      ranked.sort((a, b) => b.score - a.score);
+      return ranked.slice(0, 12).map((r) => r.id);
     },
-    [exercises, index]
+    [exercises, exerciseById, index]
   );
 
   // ─── Derived per-pattern state ───────────────────────────────────
@@ -179,7 +203,6 @@ export function PopularSeeder({
       .sort((a, b) => a.rank - b.rank);
   }, [seeds, pattern]);
 
-  const exerciseById = useMemo(() => new Map(exercises.map((e) => [e.id, e])), [exercises]);
   const matchesBySeed = useMemo(() => {
     const m = new Map<string, SeedMatch[]>();
     for (const sm of matches) {
@@ -772,6 +795,12 @@ export function PopularSeeder({
                       <p className="text-sm font-semibold text-zinc-100">{ex.canonical_name}</p>
                       <p className="text-xs text-zinc-500 mt-0.5 capitalize">
                         {ex.primary_muscles.join(', ') || '—'}
+                      </p>
+                      <p className="text-[10px] text-zinc-600 mt-1 tracking-wide uppercase">
+                        {ex.is_approved && <span className="text-lime-400">approved</span>}
+                        {ex.is_approved && ex.popularity > 0 && ' · '}
+                        {ex.popularity > 0 && <span className="text-zinc-400">pop {ex.popularity}</span>}
+                        {ex.is_low_relevancy && <span className="text-amber-400">low rel</span>}
                       </p>
                     </div>
                     <div className="grid grid-cols-3 divide-x divide-zinc-800 border-t border-zinc-800">
