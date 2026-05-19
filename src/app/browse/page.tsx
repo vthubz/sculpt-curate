@@ -11,6 +11,7 @@ interface Row {
   is_approved: boolean;
   is_low_relevancy: boolean;
   rename_count: number;
+  popularity: number;
 }
 
 export default async function BrowsePage() {
@@ -19,7 +20,7 @@ export default async function BrowsePage() {
   const [exRes, aliasRes] = await Promise.all([
     supabase
       .from('curated_exercises')
-      .select('id, canonical_name, primary_muscles, image_url, is_approved, is_low_relevancy, rename_count')
+      .select('id, canonical_name, primary_muscles, image_url, is_approved, is_low_relevancy, rename_count, popularity')
       .eq('is_hidden', false),
     supabase
       .from('exercise_aliases')
@@ -56,19 +57,22 @@ export default async function BrowsePage() {
     }
   }
 
-  // Within each muscle group: approved → unreviewed → low-rel.
-  // Inside each tier: alias count desc, then alphabetical (alias count is
-  // the strongest local "popularity" signal we have today).
-  const statusRank = (e: Row) => (e.is_low_relevancy ? 2 : e.is_approved ? 0 : 1);
-
+  // Within each muscle group:
+  // 1. Low-relevancy sinks to the bottom (matches the mobile app's ranking).
+  // 2. Otherwise, popularity score wins — the hand-curated tier list of
+  //    common gym lifts dominates so Bench/Squat/Deadlift float to the top.
+  // 3. Tie-break by alias count (friends signaling "this matters").
+  // 4. Then approved before unreviewed (a curated win edges out a 0-pop unknown).
+  // 5. Finally alphabetical.
   const sectioned = [...groups.entries()]
     .map(([muscle, exs]) => {
       const sorted = [...exs].sort((a, b) => {
-        const rankDiff = statusRank(a) - statusRank(b);
-        if (rankDiff !== 0) return rankDiff;
+        if (a.is_low_relevancy !== b.is_low_relevancy) return a.is_low_relevancy ? 1 : -1;
+        if (a.popularity !== b.popularity) return b.popularity - a.popularity;
         const aA = aliasCount.get(a.id) ?? 0;
         const bA = aliasCount.get(b.id) ?? 0;
         if (aA !== bA) return bA - aA;
+        if (a.is_approved !== b.is_approved) return a.is_approved ? -1 : 1;
         return a.canonical_name.localeCompare(b.canonical_name);
       });
       return { muscle, exercises: sorted };
@@ -92,10 +96,10 @@ export default async function BrowsePage() {
         <div className="space-y-2">
           <h1 className="text-3xl font-bold">How the system sees them</h1>
           <p className="text-sm text-zinc-500">
-            Organized by primary muscle. Within each group: approved first, then unreviewed,
-            then low-relevancy. Inside each tier we use alias count as the local popularity
-            signal — more aliases means more terms friends have said they'd type when
-            searching for it.
+            Organized by primary muscle. Within each group, the most common gym
+            exercises come first — driven by a hand-curated popularity tier
+            list. Alias counts and approval status are the next tiebreakers.
+            Low-relevancy exercises always sink to the bottom.
           </p>
           <div className="flex gap-4 text-xs text-zinc-400 pt-2">
             <span><b className="text-lime-400">{totals.approved}</b> approved</span>
@@ -140,6 +144,12 @@ export default async function BrowsePage() {
                       <p className="text-sm text-zinc-100 truncate">{ex.canonical_name}</p>
                       <p className="text-xs text-zinc-500">
                         <span className={status.cls}>{status.label}</span>
+                        {ex.popularity > 0 && (
+                          <>
+                            {' · '}
+                            <span className="text-zinc-400">pop {ex.popularity}</span>
+                          </>
+                        )}
                         {' · '}
                         {aliases} {aliases === 1 ? 'alias' : 'aliases'}
                         {ex.rename_count > 0 && ` · ${ex.rename_count} ${ex.rename_count === 1 ? 'rename' : 'renames'}`}
