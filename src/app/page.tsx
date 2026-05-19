@@ -56,7 +56,8 @@ export default async function HomePage() {
           </ul>
         </div>
 
-        <p className="text-xs text-zinc-600">
+        <p className="text-xs text-zinc-600 flex gap-4">
+          <Link href="/browse" className="text-zinc-400 hover:text-zinc-100 underline">browse catalog</Link>
           <Link href="/leaderboard" className="text-zinc-400 hover:text-zinc-100 underline">leaderboard</Link>
         </p>
       </div>
