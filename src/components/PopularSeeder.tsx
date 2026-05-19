@@ -116,9 +116,11 @@ export function PopularSeeder({
       storeFields: ['id', 'name'],
       searchOptions: {
         boost: { name: 4, aliases: 3, muscles: 2, equipment: 1 },
-        fuzzy: (term) => (term.length >= 4 ? 0.2 : 0),
-        prefix: (term) => term.length >= 2,
-        combineWith: 'AND',
+        fuzzy: 0.2,
+        prefix: true,
+        // OR-combine across tokens. AND was too strict for catalog names
+        // with extra words like "Barbell Bench Press - Medium Grip".
+        // We re-sort hits so docs that contain all tokens still rank top.
       },
     });
     ms.addAll(
@@ -132,6 +134,38 @@ export function PopularSeeder({
     );
     return ms;
   }, [exercises, aliasMap]);
+
+  // Find candidates: MiniSearch hits + a substring fallback on canonical/
+  // original_name in case the index misses obvious matches.
+  const searchCandidates = useCallback(
+    (query: string, excludeIds: Set<string>): string[] => {
+      const q = query.trim().toLowerCase();
+      if (!q) return [];
+      const hits = index.search(query);
+      const ids: string[] = [];
+      const seen = new Set<string>();
+      for (const h of hits) {
+        const id = h.id as string;
+        if (excludeIds.has(id) || seen.has(id)) continue;
+        seen.add(id);
+        ids.push(id);
+      }
+      // Substring fallback — guarantees we never miss a name that literally
+      // contains the query (e.g. typing "bench" should always surface the
+      // bench press entries).
+      const tokens = q.split(/\s+/).filter(Boolean);
+      for (const e of exercises) {
+        if (excludeIds.has(e.id) || seen.has(e.id)) continue;
+        const haystack = (e.canonical_name + ' ' + (e.original_name ?? '')).toLowerCase();
+        if (tokens.every((t) => haystack.includes(t))) {
+          seen.add(e.id);
+          ids.push(e.id);
+        }
+      }
+      return ids.slice(0, 12);
+    },
+    [exercises, index]
+  );
 
   // ─── Derived per-pattern state ───────────────────────────────────
   const seedsForPattern = useMemo(() => {
@@ -189,14 +223,8 @@ export function PopularSeeder({
         setSeeds((prev) => [...prev, seed!]);
       }
       setActiveSeed(seed);
-      // Run the local fuzzy search.
-      const hits = index.search(q);
-      // Exclude exercises we've already decided on for this seed.
       const decided = new Set(matchesBySeed.get(seed.id)?.map((m) => m.exercise_id) ?? []);
-      const ids = hits
-        .filter((h) => !decided.has(h.id as string))
-        .slice(0, 12)
-        .map((h) => h.id as string);
+      const ids = searchCandidates(q, decided);
       setCandidateIds(ids);
       setSearchDraft('');
     } finally {
@@ -513,13 +541,19 @@ export function PopularSeeder({
           </div>
           {candidates.length === 0 ? (
             <div className="rounded-lg border border-zinc-900 p-6 text-center space-y-3">
-              <p className="text-sm text-zinc-400">No catalog matches for "{activeSeed.name}".</p>
+              <p className="text-sm text-zinc-400">
+                No catalog matches for "{activeSeed.name}".
+              </p>
+              <p className="text-xs text-zinc-600">
+                Searched {exercises.length} catalog entries. If you expected a
+                match, double-check the spelling or just add it as a new entry.
+              </p>
               <button
                 onClick={addAsNew}
                 disabled={busy}
                 className="rounded-full bg-lime-400 hover:bg-lime-300 text-zinc-950 font-semibold px-5 py-2 disabled:opacity-40"
               >
-                Add as new exercise →
+                Add "{activeSeed.name}" as a new exercise →
               </button>
             </div>
           ) : (
