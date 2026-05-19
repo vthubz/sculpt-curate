@@ -92,6 +92,11 @@ export function PopularSeeder({
   const [activeSeed, setActiveSeed] = useState<Seed | null>(null);
   const [candidateIds, setCandidateIds] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
+  // When a user clicks Perfect on a card, we open this picker so they can
+  // choose which name becomes the canonical (and which become aliases).
+  const [pendingPerfect, setPendingPerfect] = useState<Exercise | null>(null);
+  const [primaryChoice, setPrimaryChoice] = useState<'seed' | 'current' | 'custom'>('seed');
+  const [customName, setCustomName] = useState('');
 
   // ─── Contributor name (localStorage) ─────────────────────────────
   useEffect(() => {
@@ -234,52 +239,22 @@ export function PopularSeeder({
 
   const decide = async (exercise: Exercise, quality: SeedMatch['match_quality']) => {
     if (!activeSeed || busy) return;
+    // Perfect: open the naming picker rather than committing immediately.
+    if (quality === 'perfect') {
+      setPendingPerfect(exercise);
+      // Default the primary to the user's typed seed text unless it's
+      // already the canonical name.
+      const seedIsAlready = exercise.canonical_name.toLowerCase() === activeSeed.name.toLowerCase();
+      setPrimaryChoice(seedIsAlready ? 'current' : 'seed');
+      setCustomName('');
+      return;
+    }
     setBusy(true);
     try {
       const seed = activeSeed;
       const popularityForSeed = popularityForRank(seed.rank);
 
-      if (quality === 'perfect') {
-        // Optionally keep the old name as an alias.
-        let keepOld = false;
-        if (
-          exercise.canonical_name.toLowerCase() !== seed.name.toLowerCase() &&
-          exercise.canonical_name
-        ) {
-          keepOld = window.confirm(
-            `Keep the old name "${exercise.canonical_name}" as an alias of "${seed.name}"?`
-          );
-        }
-
-        // Rename + approve + bump popularity (take max of current and new).
-        const newPopularity = Math.max(exercise.popularity ?? 0, popularityForSeed);
-        await supabase
-          .from('curated_exercises')
-          .update({
-            canonical_name: seed.name,
-            is_approved: true,
-            approved_at: new Date().toISOString(),
-            popularity: newPopularity,
-            rename_count: 1,
-          })
-          .eq('id', exercise.id);
-
-        if (keepOld) {
-          await supabase
-            .from('exercise_aliases')
-            .insert({ exercise_id: exercise.id, alias: exercise.canonical_name, contributor_name: name })
-            .select();
-          setAliases((prev) => [...prev, { exercise_id: exercise.id, alias: exercise.canonical_name }]);
-        }
-
-        setExercises((prev) =>
-          prev.map((e) =>
-            e.id === exercise.id
-              ? { ...e, canonical_name: seed.name, is_approved: true, popularity: newPopularity }
-              : e
-          )
-        );
-      } else if (quality === 'similar') {
+      if (quality === 'similar') {
         // Add the seed name as an alias, half-popularity, approved.
         const halfPop = Math.round(popularityForSeed / 2);
         const newPopularity = Math.max(exercise.popularity ?? 0, halfPop);
@@ -324,6 +299,100 @@ export function PopularSeeder({
       setCandidateIds((prev) => (prev ?? []).filter((id) => id !== exercise.id));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const cancelPerfect = () => {
+    setPendingPerfect(null);
+    setCustomName('');
+  };
+
+  const confirmPerfect = async () => {
+    if (!activeSeed || !pendingPerfect || busy) return;
+    const seed = activeSeed;
+    const exercise = pendingPerfect;
+
+    // Compute chosen primary + collected aliases.
+    const seedName = seed.name;
+    const currentName = exercise.canonical_name;
+    const custom = customName.trim();
+
+    let primary: string;
+    if (primaryChoice === 'seed') primary = seedName;
+    else if (primaryChoice === 'current') primary = currentName;
+    else primary = custom;
+
+    if (!primary.trim()) {
+      alert('Pick or type a name to use as the primary.');
+      return;
+    }
+
+    // Everything else (that isn't the chosen primary) becomes an alias.
+    const aliasCandidates = [seedName, currentName, custom]
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .filter((s) => s.toLowerCase() !== primary.toLowerCase());
+    const uniqueAliases = [...new Set(aliasCandidates.map((s) => s))];
+
+    setBusy(true);
+    try {
+      const popularityForSeed = popularityForRank(seed.rank);
+      const newPopularity = Math.max(exercise.popularity ?? 0, popularityForSeed);
+
+      // Update the catalog row.
+      await supabase
+        .from('curated_exercises')
+        .update({
+          canonical_name: primary,
+          is_approved: true,
+          approved_at: new Date().toISOString(),
+          popularity: newPopularity,
+          rename_count: primary === currentName ? exercise.popularity ?? 0 : 1,
+        })
+        .eq('id', exercise.id);
+
+      // Save aliases (upsert to dedupe).
+      for (const alias of uniqueAliases) {
+        await supabase
+          .from('exercise_aliases')
+          .upsert(
+            { exercise_id: exercise.id, alias, contributor_name: name },
+            { onConflict: 'exercise_id,alias' }
+          );
+      }
+
+      // Local state updates.
+      setExercises((prev) =>
+        prev.map((e) =>
+          e.id === exercise.id
+            ? { ...e, canonical_name: primary, is_approved: true, popularity: newPopularity }
+            : e
+        )
+      );
+      setAliases((prev) => [
+        ...prev,
+        ...uniqueAliases.map((alias) => ({ exercise_id: exercise.id, alias })),
+      ]);
+
+      await supabase.from('seed_matches').upsert(
+        {
+          seed_id: seed.id,
+          exercise_id: exercise.id,
+          match_quality: 'perfect',
+          contributor_name: name,
+        },
+        { onConflict: 'seed_id,exercise_id' }
+      );
+      setMatches((prev) => [
+        ...prev.filter((m) => !(m.seed_id === seed.id && m.exercise_id === exercise.id)),
+        { seed_id: seed.id, exercise_id: exercise.id, match_quality: 'perfect' },
+      ]);
+
+      setCandidateIds((prev) => (prev ?? []).filter((id) => id !== exercise.id));
+    } finally {
+      setBusy(false);
+      setPendingPerfect(null);
+      setCustomName('');
     }
   };
 
@@ -524,6 +593,135 @@ export function PopularSeeder({
           </button>
         </div>
       </section>
+
+      {/* Perfect-match naming picker (modal) */}
+      {pendingPerfect && activeSeed && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
+          onClick={cancelPerfect}
+        >
+          <div
+            className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-lime-400 font-semibold mb-1">
+                Perfect match
+              </p>
+              <h3 className="text-lg font-bold text-zinc-100">
+                Pick the primary name
+              </h3>
+              <p className="text-xs text-zinc-500 mt-1">
+                The others become aliases so search still finds them.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label
+                className={`flex items-start gap-3 cursor-pointer rounded-lg px-3 py-2 border ${
+                  primaryChoice === 'seed' ? 'border-lime-400 bg-lime-400/5' : 'border-zinc-800 hover:border-zinc-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="primary"
+                  checked={primaryChoice === 'seed'}
+                  onChange={() => setPrimaryChoice('seed')}
+                  className="mt-1 accent-lime-400"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-zinc-100 break-words">{activeSeed.name}</p>
+                  <p className="text-xs text-zinc-500">what you just typed</p>
+                </div>
+              </label>
+
+              <label
+                className={`flex items-start gap-3 cursor-pointer rounded-lg px-3 py-2 border ${
+                  primaryChoice === 'current' ? 'border-lime-400 bg-lime-400/5' : 'border-zinc-800 hover:border-zinc-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="primary"
+                  checked={primaryChoice === 'current'}
+                  onChange={() => setPrimaryChoice('current')}
+                  className="mt-1 accent-lime-400"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-zinc-100 break-words">{pendingPerfect.canonical_name}</p>
+                  <p className="text-xs text-zinc-500">current canonical</p>
+                </div>
+              </label>
+
+              <label
+                className={`flex items-start gap-3 cursor-pointer rounded-lg px-3 py-2 border ${
+                  primaryChoice === 'custom' ? 'border-lime-400 bg-lime-400/5' : 'border-zinc-800 hover:border-zinc-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="primary"
+                  checked={primaryChoice === 'custom'}
+                  onChange={() => setPrimaryChoice('custom')}
+                  className="mt-1 accent-lime-400"
+                />
+                <div className="flex-1 min-w-0">
+                  <input
+                    value={customName}
+                    onChange={(e) => {
+                      setCustomName(e.target.value);
+                      if (e.target.value.trim()) setPrimaryChoice('custom');
+                    }}
+                    placeholder="Type a different name…"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100 focus:outline-none focus:border-lime-400/50"
+                  />
+                  <p className="text-xs text-zinc-500 mt-0.5">something else entirely</p>
+                </div>
+              </label>
+            </div>
+
+            {/* Preview of what the aliases will be */}
+            {(() => {
+              const primary =
+                primaryChoice === 'seed' ? activeSeed.name
+                : primaryChoice === 'current' ? pendingPerfect.canonical_name
+                : customName.trim();
+              const aliasPreview = [activeSeed.name, pendingPerfect.canonical_name, customName.trim()]
+                .filter(Boolean)
+                .filter((s) => s.toLowerCase() !== primary.toLowerCase())
+                .filter((s, i, arr) => arr.findIndex((x) => x.toLowerCase() === s.toLowerCase()) === i);
+              if (aliasPreview.length === 0) return null;
+              return (
+                <div className="text-xs text-zinc-500 border-t border-zinc-800 pt-3">
+                  Aliases will be:{' '}
+                  {aliasPreview.map((a, i) => (
+                    <span key={a}>
+                      {i > 0 && ', '}
+                      <span className="text-zinc-300">{a}</span>
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={cancelPerfect}
+                className="rounded-lg border border-zinc-800 hover:border-zinc-700 px-4 py-2 text-sm text-zinc-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmPerfect}
+                disabled={busy || (primaryChoice === 'custom' && !customName.trim())}
+                className="rounded-lg bg-lime-400 hover:bg-lime-300 text-zinc-950 px-4 py-2 text-sm font-semibold disabled:opacity-40"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Candidate matches */}
       {activeSeed && candidates && (
