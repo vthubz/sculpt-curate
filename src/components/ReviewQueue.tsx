@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import type { CuratedExercise } from '@/lib/types';
 
@@ -16,6 +17,7 @@ export function ReviewQueue({ initial }: Props) {
   const [renameDraft, setRenameDraft] = useState('');
   const [aliasDraft, setAliasDraft] = useState('');
   const [stats, setStats] = useState({ session: 0 });
+  const [doneForNow, setDoneForNow] = useState(false);
 
   // Free-text display name stored in localStorage. Asked once.
   const [name, setName] = useState<string | null>(null);
@@ -213,6 +215,35 @@ export function ReviewQueue({ initial }: Props) {
     );
   }
 
+  if (doneForNow) {
+    return (
+      <div className="max-w-xl mx-auto px-6 py-24 text-center space-y-6">
+        <p className="text-5xl">🙌</p>
+        <div className="space-y-2">
+          <h2 className="text-2xl font-bold">Thanks, {name}.</h2>
+          <p className="text-zinc-400">
+            You handled <span className="text-lime-400 font-semibold">{stats.session}</span>{' '}
+            {stats.session === 1 ? 'exercise' : 'exercises'} this session.
+          </p>
+        </div>
+        <div className="flex items-center justify-center gap-3 pt-4">
+          <button
+            onClick={() => { setDoneForNow(false); setStats({ session: 0 }); }}
+            className="rounded-full bg-lime-400 hover:bg-lime-300 text-zinc-950 font-semibold px-6 py-3 transition"
+          >
+            Keep going
+          </button>
+          <Link
+            href="/"
+            className="rounded-full border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-zinc-100 font-semibold px-6 py-3 transition"
+          >
+            Home
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (!current) {
     return (
       <div className="max-w-xl mx-auto px-6 py-24 text-center space-y-4">
@@ -230,7 +261,12 @@ export function ReviewQueue({ initial }: Props) {
     <div className="max-w-xl mx-auto px-6 py-12 space-y-8">
       <div className="flex items-center justify-between text-xs text-zinc-500">
         <span>Signed as <span className="text-zinc-300 font-semibold">{name}</span> · {stats.session} this session</span>
-        <span>{queue.length} in queue</span>
+        <button
+          onClick={() => setDoneForNow(true)}
+          className="text-zinc-400 hover:text-lime-400 transition"
+        >
+          Done for now →
+        </button>
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
