@@ -36,6 +36,8 @@ export default async function ReviewPage() {
             <span className="text-zinc-300 font-semibold">{approved ?? 0}</span> / {total ?? '…'} approved
           </span>
           <span>·</span>
+          <Link href="/popular" className="hover:text-zinc-100">Seed popular</Link>
+          <span>·</span>
           <Link href="/browse" className="hover:text-zinc-100">Browse</Link>
           <span>·</span>
           <Link href="/leaderboard" className="hover:text-zinc-100">Leaderboard</Link>

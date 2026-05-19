@@ -40,12 +40,20 @@ export default async function HomePage() {
           </div>
         ) : null}
 
-        <Link
-          href="/review"
-          className="self-start inline-flex items-center gap-3 rounded-full bg-lime-400 px-6 py-3 font-semibold text-zinc-950 transition hover:bg-lime-300"
-        >
-          Start curating →
-        </Link>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Link
+            href="/popular"
+            className="inline-flex items-center justify-center gap-3 rounded-full bg-lime-400 px-6 py-3 font-semibold text-zinc-950 transition hover:bg-lime-300"
+          >
+            Seed popular exercises →
+          </Link>
+          <Link
+            href="/review"
+            className="inline-flex items-center justify-center gap-3 rounded-full border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-zinc-100 px-6 py-3 font-semibold transition"
+          >
+            Review one-by-one
+          </Link>
+        </div>
 
         <div className="text-sm text-zinc-500 space-y-2 pt-8 border-t border-zinc-900">
           <p>What you can do here:</p>
